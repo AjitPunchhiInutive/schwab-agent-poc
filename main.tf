@@ -211,7 +211,7 @@ resource "google_sql_database_instance" "postgres" {
   database_version    = "POSTGRES_15"
   region              = local.compute_region
   project             = "schwab-agent-poc"
-  deletion_protection = true
+  deletion_protection = false
 
   settings {
     tier              = "db-custom-2-4096"
