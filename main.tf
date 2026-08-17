@@ -196,9 +196,7 @@ resource "google_compute_firewall" "allow_internal_postgres" {
   description   = "Allow PostgreSQL from internal VPC (agent to Cloud SQL)"
 }
 
-# ══════════════════════════════════════════════════════════════════════
-# Cloud SQL (PostgreSQL)
-# ══════════════════════════════════════════════════════════════════════
+
 
 resource "google_sql_database_instance" "postgres" {
   name                = "apm-validation-db"
