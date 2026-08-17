@@ -223,7 +223,7 @@ resource "google_sql_database_instance" "postgres" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.agent_vpc.id
-      require_ssl     = true
+      
     }
 
     database_flags {
