@@ -225,7 +225,7 @@ jobs:
               --vpc-connector="${{ env.VPC_CONNECTOR }}" \
               --vpc-egress=private-ranges-only \
               --no-allow-unauthenticated \
-              --ingress=internal-only \
+              --ingress=internal \
               --memory=512Mi \
               --cpu=1 \
               --min-instances=1 \
