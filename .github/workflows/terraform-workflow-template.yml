@@ -85,7 +85,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan -var-file=gcp-project-factory-repo.tfvars -out=tfplan
+        run: terraform plan -var-file=schwab-agent-poc.tfvars -out=tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
@@ -150,7 +150,7 @@ jobs:
 
       # Fresh plan after approval — this is the plan that will be applied
       - name: Terraform Plan
-        run: terraform plan -var-file=gcp-project-factory-repo.tfvars -out=tfplan
+        run: terraform plan -var-file=schwab-agent-poc.tfvars -out=tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
