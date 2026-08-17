@@ -1,0 +1,275 @@
+name: Deploy Runtime Validation Agent
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'agent/**'
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: schwab-agent-poc
+  REGION: us-east4
+  REPOSITORY: agent-images
+  IMAGE_NAME: runtime-validation-agent
+  SERVICE_NAME: runtime-validation-agent
+  SERVICE_ACCOUNT: sa-runtime-agent@schwab-agent-poc.iam.gserviceaccount.com
+  VPC_CONNECTOR: agent-vpc-connector
+  WORKING_DIR: "agent"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Job 1 │ Build & Push Docker Image
+# ══════════════════════════════════════════════════════════════════════════════
+jobs:
+
+  build:
+    name: "Step 1 | Build & Push Docker Image"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image: ${{ steps.set-image.outputs.image }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id:                 ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup GCloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: 'latest'
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve Image Tags
+        id: set-image
+        run: |
+          FULL_IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.run_id }}"
+          LATEST="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:latest"
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Docker Build & Push"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Image  : $FULL_IMAGE"
+          echo "  Latest : $LATEST"
+          echo "  Source : ./${{ env.WORKING_DIR }}/Dockerfile"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+
+          {
+            echo "TAGS<<EOF"
+            echo "$FULL_IMAGE"
+            echo "$LATEST"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context:    ./${{ env.WORKING_DIR }}
+          file:       ./${{ env.WORKING_DIR }}/Dockerfile
+          push:       true
+          tags:       ${{ steps.set-image.outputs.TAGS }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Job 2 │ Deployment Plan
+# ══════════════════════════════════════════════════════════════════════════════
+  plan:
+    name: "Step 2 | Deployment Plan"
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id:                 ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup GCloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: 'latest'
+
+      - name: Show Deployment Plan
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Runtime Validation Agent — Deploy Plan"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Project         : ${{ env.PROJECT_ID }}"
+          echo "  Region          : ${{ env.REGION }}"
+          echo "  Service         : ${{ env.SERVICE_NAME }}"
+          echo "  Image           : ${{ needs.build.outputs.image }}"
+          echo "  Service Account : ${{ env.SERVICE_ACCOUNT }}"
+          echo "  VPC Connector   : ${{ env.VPC_CONNECTOR }}"
+          echo "  Memory          : 512Mi"
+          echo "  CPU             : 1"
+          echo "  Min Instances   : 1"
+          echo "  Max Instances   : 10"
+          echo "  Ingress         : internal-only"
+          echo "  Auth            : IAM required"
+          echo "  Triggered By    : ${{ github.actor }}"
+          echo "  Run ID          : ${{ github.run_id }}"
+          echo "  Branch          : ${{ github.head_ref || github.ref_name }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Preview Existing Service
+        run: |
+          echo "Current Cloud Run Service Status:"
+          gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --format="table(
+                metadata.name,
+                spec.template.spec.containers[0].image,
+                spec.template.spec.serviceAccountName,
+                status.url
+              )" 2>/dev/null \
+          || echo "  ⚠️  Service '${{ env.SERVICE_NAME }}' not found — will be created fresh."
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Job 3 │ Approval Gate
+# ══════════════════════════════════════════════════════════════════════════════
+  approval:
+    name: "Step 3 | Approval Gate"
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment:
+      name: agent-deploy
+      url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Approval Required
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Review the plan above and approve"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ✅ Approval granted — deploying agent"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Job 4 │ Deploy to Cloud Run
+# ══════════════════════════════════════════════════════════════════════════════
+  deploy:
+    name: "Step 4 | Deploy to Cloud Run"
+    needs: [build, approval]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id:                 ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Setup GCloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: 'latest'
+
+      - name: Deploy to Cloud Run
+        run: |
+          FULL_IMAGE="${{ needs.build.outputs.image }}"
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Deploying Runtime Validation Agent"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          if gcloud run services describe "${{ env.SERVICE_NAME }}" \
+              --region="${{ env.REGION }}" \
+              --project="${{ env.PROJECT_ID }}" \
+              --quiet 2>/dev/null; then
+
+            echo "🔄 Service exists — updating..."
+            gcloud run services update "${{ env.SERVICE_NAME }}" \
+              --image="${FULL_IMAGE}" \
+              --region="${{ env.REGION }}" \
+              --project="${{ env.PROJECT_ID }}" \
+              --quiet
+
+          else
+
+            echo "🆕 Service not found — creating..."
+            gcloud run deploy "${{ env.SERVICE_NAME }}" \
+              --image="${FULL_IMAGE}" \
+              --region="${{ env.REGION }}" \
+              --project="${{ env.PROJECT_ID }}" \
+              --service-account="${{ env.SERVICE_ACCOUNT }}" \
+              --vpc-connector="${{ env.VPC_CONNECTOR }}" \
+              --vpc-egress=private-ranges-only \
+              --no-allow-unauthenticated \
+              --ingress=internal-only \
+              --memory=512Mi \
+              --cpu=1 \
+              --min-instances=1 \
+              --max-instances=10 \
+              --timeout=60 \
+              --concurrency=80 \
+              --set-env-vars="GCP_PROJECT_ID=${{ env.PROJECT_ID }},AGENT_ENV=prod" \
+              --labels="app=runtime-agent,team=cloud-engineering,env=prod,agent-type=deterministic" \
+              --quiet
+
+          fi
+
+          echo "✅ Agent deployed: $FULL_IMAGE"
+
+      - name: Verify Deployment
+        run: |
+          gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --format="table(
+                metadata.name,
+                spec.template.spec.containers[0].image,
+                spec.template.spec.serviceAccountName,
+                status.url
+              )"
+
+          SERVICE_URL=$(gcloud run services describe "${{ env.SERVICE_NAME }}" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --format="value(status.url)")
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ✅ Runtime Validation Agent Deployed"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Service URL : ${SERVICE_URL}"
+          echo "  Image       : ${{ needs.build.outputs.image }}"
+          echo "  Project     : ${{ env.PROJECT_ID }}"
+          echo "  Region      : ${{ env.REGION }}"
+          echo "  Auth        : IAM required"
+          echo "  Ingress     : Internal only"
+          echo "  Run ID      : ${{ github.run_id }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "  Test with:"
+          echo "    curl -H \"Authorization: Bearer \$(gcloud auth print-identity-token)\" \\"
+          echo "      ${SERVICE_URL}/healthz"
