@@ -1,9 +1,3 @@
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  Runtime Validation Agent — Infrastructure
-#  Project: melodic-furnace-403022 (schwab-agent-poc)
-#  State:   gs://itp-terraform-test/schwab-agent-poc/state
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 locals {
   compute_region = "us-east4"
   agent_sa_name  = "sa-runtime-agent"
