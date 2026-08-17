@@ -260,7 +260,7 @@ resource "google_sql_database" "apm_db" {
 
 # IAM database user — agent authenticates via service account, no password
 resource "google_sql_user" "agent_iam_user" {
-  name     = google_service_account.agent.email
+  name     = trimsuffix(google_service_account.agent.email, ".gserviceaccount.com")
   instance = google_sql_database_instance.postgres.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
   project  = var.gcp_project
