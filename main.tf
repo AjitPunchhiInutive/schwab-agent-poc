@@ -36,7 +36,7 @@ resource "google_project_service" "apis" {
     "compute.googleapis.com",
   ])
 
-  project            = var.gcp_project_agent
+  project            = "schwab-agent-poc"
   service            = each.value
   disable_on_destroy = false
 }
@@ -49,7 +49,7 @@ resource "google_service_account" "agent" {
   account_id   = local.agent_sa_name
   display_name = "Runtime Validation Agent"
   description  = "Deterministic agent — APM ID validation against PostgreSQL"
-  project      = var.gcp_project_agent
+  project      = "schwab-agent-poc"
 
   depends_on = [google_project_service.apis]
 }
@@ -68,7 +68,7 @@ locals {
 resource "google_project_iam_member" "agent_roles" {
   for_each = toset(local.agent_roles)
 
-  project = var.gcp_project_agent
+  project = "schwab-agent-poc"
   role    = each.value
   member  = "serviceAccount:${google_service_account.agent.email}"
 }
@@ -85,7 +85,7 @@ resource "google_secret_manager_secret" "secrets" {
   ])
 
   secret_id = each.value
-  project   = var.gcp_project_agent
+  project   = "schwab-agent-poc"
   labels    = local.labels
 
   replication {
@@ -102,7 +102,7 @@ resource "google_secret_manager_secret_iam_member" "agent_secret_access" {
     "apm-client-secret",
   ])
 
-  project   = var.gcp_project_agent
+  project   = "schwab-agent-poc"
   secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.agent.email}"
@@ -120,7 +120,7 @@ resource "google_secret_manager_secret_iam_member" "agent_secret_access" {
 resource "google_compute_network" "agent_vpc" {
   name                    = "agent-vpc"
   auto_create_subnetworks = false
-  project                 = var.gcp_project_agent
+  project                 = "schwab-agent-poc"
 
   depends_on = [google_project_service.apis]
 }
@@ -130,7 +130,7 @@ resource "google_compute_subnetwork" "agent_subnet" {
   ip_cidr_range            = "10.0.0.0/24"
   region                   = local.compute_region
   network                  = google_compute_network.agent_vpc.id
-  project                  = var.gcp_project_agent
+  project                  = "schwab-agent-poc"
   private_ip_google_access = true
 }
 
@@ -138,7 +138,7 @@ resource "google_compute_subnetwork" "agent_subnet" {
 resource "google_vpc_access_connector" "agent_connector" {
   name          = "agent-vpc-connector"
   region        = local.compute_region
-  project       = var.gcp_project_agent
+  project       = "schwab-agent-poc"
   ip_cidr_range = "10.8.0.0/28"
   network       = google_compute_network.agent_vpc.name
 
@@ -155,7 +155,7 @@ resource "google_compute_global_address" "private_ip_range" {
   address_type  = "INTERNAL"
   prefix_length = 16
   network       = google_compute_network.agent_vpc.id
-  project       = var.gcp_project_agent
+  project       = "schwab-agent-poc"
 }
 
 resource "google_service_networking_connection" "private_vpc" {
@@ -173,7 +173,7 @@ resource "google_service_networking_connection" "private_vpc" {
 resource "google_compute_firewall" "deny_all_ingress" {
   name    = "deny-all-ingress"
   network = google_compute_network.agent_vpc.name
-  project = var.gcp_project_agent
+  project = "schwab-agent-poc"
 
   direction = "INGRESS"
   priority  = 65534
@@ -188,7 +188,7 @@ resource "google_compute_firewall" "deny_all_ingress" {
 resource "google_compute_firewall" "allow_internal_postgres" {
   name    = "allow-internal-postgres"
   network = google_compute_network.agent_vpc.name
-  project = var.gcp_project_agent
+  project = "schwab-agent-poc"
 
   direction = "INGRESS"
   priority  = 1000
@@ -210,7 +210,7 @@ resource "google_sql_database_instance" "postgres" {
   name                = "apm-validation-db"
   database_version    = "POSTGRES_15"
   region              = local.compute_region
-  project             = var.gcp_project_agent
+  project             = "schwab-agent-poc"
   deletion_protection = true
 
   settings {
@@ -255,7 +255,7 @@ resource "google_sql_database_instance" "postgres" {
 resource "google_sql_database" "apm_db" {
   name     = "apm_db"
   instance = google_sql_database_instance.postgres.name
-  project  = var.gcp_project_agent
+  project  = "schwab-agent-poc"
 }
 
 # IAM database user — agent authenticates via service account, no password
@@ -263,7 +263,7 @@ resource "google_sql_user" "agent_iam_user" {
   name     = trimsuffix(google_service_account.agent.email, ".gserviceaccount.com")
   instance = google_sql_database_instance.postgres.name
   type     = "CLOUD_IAM_SERVICE_ACCOUNT"
-  project  = var.gcp_project_agent
+  project  = "schwab-agent-poc"
 }
 
 # ══════════════════════════════════════════════════════════════════════
@@ -274,7 +274,7 @@ resource "google_artifact_registry_repository" "agent_images" {
   location      = local.compute_region
   repository_id = "agent-images"
   format        = "DOCKER"
-  project       = var.gcp_project_agent
+  project       = "schwab-agent-poc"
   description   = "Container images for runtime validation agent"
   labels        = local.labels
 
