@@ -8,6 +8,11 @@ variable "gcp_project" {
   type        = string
 }
 
+variable "gcp_project_agent" {
+  description = "GCP project ID to deploy resources into"
+  type        = string
+}
+
 variable "region" {
   description = "GCP region for resource deployment"
   type        = string
