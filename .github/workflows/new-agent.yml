@@ -1,4 +1,4 @@
-name: Deploy Agent to Agent Platform
+name: POC Agent Deployment
 
 on:
   push:
